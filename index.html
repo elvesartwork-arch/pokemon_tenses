@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>時態大師：PokeAPI 經典收服戰</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #5a8a5a; font-family: 'Courier New', monospace; touch-action: none; }
+        #ui { position: absolute; top: 15px; width: 100%; text-align: center; color: #fff; pointer-events: none; z-index: 10; }
+        #score { font-size: 24px; font-weight: bold; color: #ffcb05; text-shadow: 2px 2px 0 #3b4cca; }
+        #question-box { 
+            background: #fff; color: #333; padding: 12px; border: 4px double #333; 
+            border-radius: 8px; margin: 10px 15px; box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+            font-size: 18px; line-height: 1.4; font-weight: bold;
+        }
+        canvas { display: block; image-rendering: pixelated; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="score">EXP: 0 | 已收服: 0/30</div>
+        <div id="question-box"><div id="question">正在召喚寶可夢...</div></div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const questEl = document.getElementById('question');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let score = 0, count = 0, playerX = canvas.width / 2, targets = [], gameActive = true, flash = 0;
+const spriteCache = {};
+
+const questions = [
+    {q:"Yesterday, I ____ (go) to school.", a:"went", o:["went","go","gone"]},
+    {q:"She ____ (study) every day.", a:"studies", o:["study","studies","studying"]},
+    {q:"Look! It ____ (rain) now.", a:"is raining", o:["rains","is raining","rained"]},
+    {q:"They ____ (not/see) him yet.", a:"haven't seen", o:["didn't see","haven't seen","not saw"]},
+    {q:"I ____ (watch) TV at 8 last night.", a:"was watching", o:["watched","was watching","watch"]},
+    {q:"We ____ (finish) it tomorrow.", a:"will finish", o:["finish","will finish","finished"]},
+    {q:"He ____ (be) a doctor since 2015.", a:"has been", o:["is","was","has been"]},
+    {q:"If it ____ (snow), we'll ski.", a:"snows", o:["snows","snow","will snow"]},
+    {q:"Wait! The train ____ (come).", a:"is coming", o:["comes","is coming","came"]},
+    {q:"____ (you/buy) the car last week?", a:"Did you buy", o:["Do you buy","Did you buy","Have you bought"]},
+    {q:"Water ____ (turn) into ice at 0°C.", a:"turns", o:["turn","turns","turning"]},
+    {q:"By 10 PM, I ____ (sleep).", a:"will be sleeping", o:["sleep","will be sleeping","slept"]},
+    {q:"I ____ (lose) my key yesterday.", a:"lost", o:["lost","lose","losed"]},
+    {q:"She ____ (already/eat) dinner.", a:"has already eaten", o:["already ate","has already eaten","eats"]},
+    {q:"Listen! Someone ____ (knock).", a:"is knocking", o:["knocks","is knocking","knocked"]},
+    {q:"While I ____ (run), I fell.", a:"was running", o:["ran","was running","run"]},
+    {q:"They ____ (live) here for a year.", a:"have lived", o:["lived","live","have lived"]},
+    {q:"Tomorrow ____ (be) Monday.", a:"will be", o:["is","was","will be"]},
+    {q:"I ____ (not/do) my homework yet.", a:"haven't done", o:["didn't do","haven't done","not do"]},
+    {q:"When I arrived, they ____ (leave).", a:"had left", o:["left","had left","have left"]},
+    {q:"He ____ (play) guitar every night.", a:"plays", o:["play","plays","playing"]},
+    {q:"____ (you/see) the moon now?", a:"Do you see", o:["Do you see","Are you seeing","Did you see"]},
+    {q:"It ____ (be) cold last night.", a:"was", o:["is","was","been"]},
+    {q:"We ____ (have) lunch when he came.", a:"were having", o:["had","were having","have"]},
+    {q:"I ____ (tell) you the truth later.", a:"will tell", o:["tell","will tell","told"]},
+    {q:"She ____ (never/be) to Paris.", a:"has never been", o:["is never","was never","has never been"]},
+    {q:"The sun ____ (set) in the west.", a:"sets", o:["set","sets","setting"]},
+    {q:"____ (she/work) in a bank?", a:"Does she work", o:["Is she work","Does she work","Do she work"]},
+    {q:"I ____ (read) 5 books this month.", a:"have read", o:["read","have read","reading"]},
+    {q:"By next week, I ____ (finish) it.", a:"will have finished", o:["finish","will finish","will have finished"]}
+];
+
+function getPokeImg(key) {
+    if (spriteCache[key]) return spriteCache[key];
+    const img = new Image();
+    const randomId = Math.floor(Math.random() * 151) + 1;
+    img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${randomId}.png`;
+    spriteCache[key] = img;
+    return img;
+}
+
+function initQuestion() {
+    if (count >= 30) { gameActive = false; alert("🎉 恭喜！你已成為時態大師！"); location.reload(); return; }
+    const q = questions[count];
+    questEl.innerText = `野生寶可夢出現了！\n` + q.q;
+    const step = canvas.width / (q.o.length + 1);
+    targets = q.o.map((text, i) => ({
+        x: step * (i + 1), y: -150, text: text,
+        img: getPokeImg(`${count}_${i}`),
+        speed: 2.2 + (count * 0.1),
+        offset: Math.random() * 100
+    }));
+}
+
+function drawBall(x, y) {
+    const r = 35;
+    ctx.save();
+    ctx.translate(x, y);
+    if(flash > 0) ctx.scale(1.2, 1.2);
+    ctx.fillStyle = "#eee"; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "#e3350d"; ctx.beginPath(); ctx.arc(0, 0, r, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2); ctx.fillStyle="#fff"; ctx.fill(); ctx.stroke();
+    ctx.restore();
+}
+
+window.addEventListener('mousemove', e => playerX = e.clientX);
+window.addEventListener('touchmove', e => { playerX = e.touches[0].clientX; e.preventDefault(); }, {passive: false});
+
+function draw() {
+    if (!gameActive) return;
+    ctx.fillStyle = flash > 0 ? "#fff" : "#5a8a5a";
+    if(flash > 0) flash--;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#4a7c44";
+    for(let i=0; i<15; i++) ctx.fillRect((i*213)%canvas.width, (i*317)%canvas.height, 30, 4);
+
+    drawBall(playerX, canvas.height - 100);
+
+    let reset = false;
+    const now = Date.now();
+
+    targets.forEach(t => {
+        t.y += t.speed;
+        const bounceY = Math.sin((now + t.offset) / 150) * 12;
+        const scaleY = 1 + Math.sin((now + t.offset) / 150) * 0.05;
+
+        ctx.beginPath();
+        ctx.ellipse(t.x, t.y + 45, 25 + bounceY/2, 10, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.15)";
+        ctx.fill();
+
+        if (t.img.complete) {
+            ctx.save();
+            ctx.translate(t.x, t.y + bounceY);
+            ctx.scale(1, scaleY);
+            ctx.drawImage(t.img, -50, -50, 100, 100);
+            ctx.restore();
+        }
+
+        ctx.fillStyle = "white"; ctx.font = "bold 18px 'Courier New'";
+        const tw = ctx.measureText(t.text).width + 20;
+        ctx.fillRect(t.x - tw/2, t.y + 45, tw, 35);
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.strokeRect(t.x - tw/2, t.y + 45, tw, 35);
+        ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.fillText(t.text, t.x, t.y + 68);
+
+        if (Math.hypot(t.x - playerX, t.y - (canvas.height - 100)) < 70) {
+            if (t.text === questions[count].a) {
+                score += 100; count++; flash = 5;
+                scoreEl.innerText = `EXP: ${score} | 已收服: ${count}/30`;
+                reset = true;
+            } else {
+                gameActive = false;
+                alert(`收服失敗！\n正確答案是：${questions[count].a}`);
+                location.reload();
+            }
+        }
+        if (t.y > canvas.height + 150) reset = true;
+    });
+    
+    if (reset) initQuestion();
+    requestAnimationFrame(draw);
+}
+
+initQuestion();
+draw();
+</script>
+</body>
+</html>
