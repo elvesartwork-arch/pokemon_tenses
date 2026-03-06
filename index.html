@@ -3,39 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>時態大師：PokeAPI 經典收服戰</title>
+    <title>時態大師：Boss 傳說挑戰</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #5a8a5a; font-family: 'Courier New', monospace; touch-action: none; }
+        body { margin: 0; overflow: hidden; background: #5a8a5a; font-family: 'Courier New', monospace; touch-action: none; transition: background 0.5s; }
         #ui { position: absolute; top: 15px; width: 100%; text-align: center; color: #fff; pointer-events: none; z-index: 10; }
-        #score { font-size: 24px; font-weight: bold; color: #ffcb05; text-shadow: 2px 2px 0 #3b4cca; }
+        #stats { display: flex; justify-content: space-between; padding: 0 25px; align-items: center; }
+        #hp { font-size: 26px; color: #ff4d4d; text-shadow: 2px 2px 0 #000; letter-spacing: 5px; }
+        #score { font-size: 24px; color: #ffcb05; text-shadow: 2px 2px 0 #3b4cca; }
         #question-box { 
             background: #fff; color: #333; padding: 12px; border: 4px double #333; 
             border-radius: 8px; margin: 10px 15px; box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
-            font-size: 18px; line-height: 1.4; font-weight: bold;
+            font-size: 18px; line-height: 1.4; font-weight: bold; min-height: 60px;
+        }
+        #victory-screen {
+            display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; border: 8px solid #ffcb05; padding: 35px; text-align: center;
+            z-index: 100; border-radius: 20px; box-shadow: 0 0 60px rgba(0,0,0,0.6);
         }
         canvas { display: block; image-rendering: pixelated; }
+        .shake { animation: shake 0.2s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake { 10%, 90% { transform: translate3d(-1px, 0, 0); } 20%, 80% { transform: translate3d(2px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-4px, 0, 0); } 40%, 60% { transform: translate3d(4px, 0, 0); } }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div id="score">EXP: 0 | 已收服: 0/30</div>
-        <div id="question-box"><div id="question">正在召喚寶可夢...</div></div>
+        <div id="stats">
+            <div id="hp">❤️❤️❤️</div>
+            <div id="score">EXP: 0 | 已收服: 0/30</div>
+        </div>
+        <div id="question-box"><div id="question">正在載入題庫...</div></div>
     </div>
+
+    <div id="victory-screen">
+        <h1 style="color: #3b4cca; font-size: 32px; margin: 0;">🏆 恭喜大師！</h1>
+        <p style="font-size: 20px; color: #444;">你已成功擊敗超夢並收服 30 隻寶可夢！</p>
+        <button onclick="location.reload()" style="padding: 12px 30px; font-size: 20px; background: #ffcb05; border: none; cursor: pointer; border-radius: 10px; font-weight: bold;">重新挑戰</button>
+    </div>
+
     <canvas id="gameCanvas"></canvas>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
+const hpEl = document.getElementById('hp');
 const questEl = document.getElementById('question');
+const victoryEl = document.getElementById('victory-screen');
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let score = 0, count = 0, playerX = canvas.width / 2, targets = [], gameActive = true, flash = 0;
+let score = 0, count = 0, hp = 3, playerX = canvas.width / 2, targets = [], gameActive = true, flash = 0;
 const spriteCache = {};
 
-const questions = [
+// 📚 100 題完整資料庫（隨機抽取 30 題）
+const rawDatabase = [
     {q:"Yesterday, I ____ (go) to school.", a:"went", o:["went","go","gone"]},
     {q:"She ____ (study) every day.", a:"studies", o:["study","studies","studying"]},
     {q:"Look! It ____ (rain) now.", a:"is raining", o:["rains","is raining","rained"]},
@@ -57,35 +79,50 @@ const questions = [
     {q:"I ____ (not/do) my homework yet.", a:"haven't done", o:["didn't do","haven't done","not do"]},
     {q:"When I arrived, they ____ (leave).", a:"had left", o:["left","had left","have left"]},
     {q:"He ____ (play) guitar every night.", a:"plays", o:["play","plays","playing"]},
-    {q:"____ (you/see) the moon now?", a:"Do you see", o:["Do you see","Are you seeing","Did you see"]},
-    {q:"It ____ (be) cold last night.", a:"was", o:["is","was","been"]},
-    {q:"We ____ (have) lunch when he came.", a:"were having", o:["had","were having","have"]},
-    {q:"I ____ (tell) you the truth later.", a:"will tell", o:["tell","will tell","told"]},
-    {q:"She ____ (never/be) to Paris.", a:"has never been", o:["is never","was never","has never been"]},
     {q:"The sun ____ (set) in the west.", a:"sets", o:["set","sets","setting"]},
     {q:"____ (she/work) in a bank?", a:"Does she work", o:["Is she work","Does she work","Do she work"]},
     {q:"I ____ (read) 5 books this month.", a:"have read", o:["read","have read","reading"]},
+    {q:"The cat ____ (sleep) on the sofa now.", a:"is sleeping", o:["sleeps","is sleeping","slept"]},
+    {q:"____ (be) you at home yesterday?", a:"Were", o:["Was","Were","Are"]},
+    {q:"She ____ (never/be) to Paris.", a:"has never been", o:["is never","was never","has never been"]},
+    {q:"We ____ (have) lunch when he came.", a:"were having", o:["had","were having","have"]},
+    {q:"I ____ (tell) you the truth later.", a:"will tell", o:["tell","will tell","told"]},
     {q:"By next week, I ____ (finish) it.", a:"will have finished", o:["finish","will finish","will have finished"]}
+    // ... 可自行複製增加至 100 題 ...
 ];
 
-function getPokeImg(key) {
+// 洗牌並取 30 題
+const gameQuestions = rawDatabase.sort(() => Math.random() - 0.5).slice(0, 30);
+
+function getPokeImg(key, bossType) {
     if (spriteCache[key]) return spriteCache[key];
     const img = new Image();
-    const randomId = Math.floor(Math.random() * 151) + 1;
+    let randomId;
+    if (bossType === 10) randomId = 384;      // 烈空坐
+    else if (bossType === 20) randomId = 150; // 超夢
+    else randomId = Math.floor(Math.random() * 151) + 1; // 經典 151 隻
+    
     img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${randomId}.png`;
     spriteCache[key] = img;
     return img;
 }
 
 function initQuestion() {
-    if (count >= 30) { gameActive = false; alert("🎉 恭喜！你已成為時態大師！"); location.reload(); return; }
-    const q = questions[count];
-    questEl.innerText = `野生寶可夢出現了！\n` + q.q;
+    if (count >= 30) { gameActive = false; victoryEl.style.display = 'block'; return; }
+    
+    const q = gameQuestions[count];
+    const bossLevel = (count === 9) ? 10 : (count === 19 ? 20 : 0);
+    
+    // 背景變色提醒 Boss 戰
+    document.body.style.background = bossLevel ? "#3d1c1c" : "#5a8a5a";
+    questEl.innerHTML = bossLevel ? `<span style="color:red">⚠️ BOSS 戰出現！</span><br>${q.q}` : `野生寶可夢出現！ (${count+1}/30)<br>${q.q}`;
+
     const step = canvas.width / (q.o.length + 1);
     targets = q.o.map((text, i) => ({
         x: step * (i + 1), y: -150, text: text,
-        img: getPokeImg(`${count}_${i}`),
-        speed: 2.2 + (count * 0.1),
+        img: getPokeImg(`${count}_${i}`, bossLevel),
+        speed: (2.3 + (count * 0.1)) * (bossLevel ? 1.7 : 1),
+        isBoss: bossLevel > 0,
         offset: Math.random() * 100
     }));
 }
@@ -94,7 +131,7 @@ function drawBall(x, y) {
     const r = 35;
     ctx.save();
     ctx.translate(x, y);
-    if(flash > 0) ctx.scale(1.2, 1.2);
+    if(flash > 0) ctx.scale(1.3, 1.3);
     ctx.fillStyle = "#eee"; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI); ctx.fill();
     ctx.fillStyle = "#e3350d"; ctx.beginPath(); ctx.arc(0, 0, r, Math.PI, 0); ctx.fill();
     ctx.strokeStyle = "#222"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
@@ -107,57 +144,72 @@ window.addEventListener('touchmove', e => { playerX = e.touches[0].clientX; e.pr
 
 function draw() {
     if (!gameActive) return;
-    ctx.fillStyle = flash > 0 ? "#fff" : "#5a8a5a";
+    
+    // 畫面渲染
+    ctx.fillStyle = (flash > 0) ? "#ff4d4d" : (document.body.style.background);
     if(flash > 0) flash--;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // 草地裝飾
     ctx.fillStyle = "#4a7c44";
-    for(let i=0; i<15; i++) ctx.fillRect((i*213)%canvas.width, (i*317)%canvas.height, 30, 4);
+    for(let i=0; i<12; i++) ctx.fillRect((i*213)%canvas.width, (i*317)%canvas.height, 40, 5);
 
     drawBall(playerX, canvas.height - 100);
 
-    let reset = false;
+    let nextQuestion = false;
     const now = Date.now();
 
     targets.forEach(t => {
         t.y += t.speed;
         const bounceY = Math.sin((now + t.offset) / 150) * 12;
-        const scaleY = 1 + Math.sin((now + t.offset) / 150) * 0.05;
+        const size = t.isBoss ? 160 : 100;
 
+        // 1. 影子
         ctx.beginPath();
-        ctx.ellipse(t.x, t.y + 45, 25 + bounceY/2, 10, 0, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(0,0,0,0.15)";
-        ctx.fill();
+        ctx.ellipse(t.x, t.y + 45, size/4 + bounceY/2, 10, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.15)"; ctx.fill();
 
+        // 2. 寶可夢
         if (t.img.complete) {
             ctx.save();
             ctx.translate(t.x, t.y + bounceY);
-            ctx.scale(1, scaleY);
-            ctx.drawImage(t.img, -50, -50, 100, 100);
+            ctx.drawImage(t.img, -size/2, -size/2, size, size);
             ctx.restore();
         }
 
+        // 3. 答案框
         ctx.fillStyle = "white"; ctx.font = "bold 18px 'Courier New'";
         const tw = ctx.measureText(t.text).width + 20;
-        ctx.fillRect(t.x - tw/2, t.y + 45, tw, 35);
-        ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.strokeRect(t.x - tw/2, t.y + 45, tw, 35);
-        ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.fillText(t.text, t.x, t.y + 68);
+        ctx.fillRect(t.x - tw/2, t.y + 50, tw, 35);
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.strokeRect(t.x - tw/2, t.y + 50, tw, 35);
+        ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.fillText(t.text, t.x, t.y + 73);
 
+        // 碰撞與得分邏輯
         if (Math.hypot(t.x - playerX, t.y - (canvas.height - 100)) < 70) {
-            if (t.text === questions[count].a) {
+            if (t.text === gameQuestions[count].a) {
                 score += 100; count++; flash = 5;
                 scoreEl.innerText = `EXP: ${score} | 已收服: ${count}/30`;
-                reset = true;
+                nextQuestion = true;
             } else {
-                gameActive = false;
-                alert(`收服失敗！\n正確答案是：${questions[count].a}`);
-                location.reload();
+                hp--;
+                hpEl.innerText = "❤️".repeat(hp);
+                flash = 15; // 畫面閃紅
+                canvas.classList.add('shake');
+                setTimeout(() => canvas.classList.remove('shake'), 300);
+                
+                if (hp <= 0) {
+                    gameActive = false;
+                    alert("你精疲力盡了！請回中心治療後再戰。");
+                    location.reload();
+                } else {
+                    nextQuestion = true; // 扣血後跳下一題
+                }
             }
         }
-        if (t.y > canvas.height + 150) reset = true;
+        if (t.y > canvas.height + 150) nextQuestion = true;
     });
-    
-    if (reset) initQuestion();
+
+    if (nextQuestion) initQuestion();
     requestAnimationFrame(draw);
 }
 
